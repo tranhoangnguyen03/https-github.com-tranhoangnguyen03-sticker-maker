@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { Layers, Image as ImageIcon, Sparkles, Download, Trash2, XCircle, Key, ChevronLeft, ChevronRight, Home, Eye, EyeOff } from 'lucide-react';
+import { Layers, Image as ImageIcon, Sparkles, Download, Trash2, XCircle, Key, ChevronLeft, ChevronRight, Home } from 'lucide-react';
 
 import Header from './components/Header';
 import UploadArea from './components/UploadArea';
@@ -15,13 +15,9 @@ const MAX_BATCH_SIZE = 6;
 const App: React.FC = () => {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showLanding, setShowLanding] = useState(true);
-  
-  // Environment Detection
-  const [isAIStudio, setIsAIStudio] = useState(false);
 
-  // API Key State logic
-  const [aiStudioHasKey, setAiStudioHasKey] = useState(false);
-  const [customApiKey, setCustomApiKey] = useState(() => {
+  // API Key State logic - Simplified to manual entry only
+  const [apiKey, setApiKey] = useState(() => {
     // 1. Check environment variable (build time)
     if (process.env.API_KEY) {
       return process.env.API_KEY;
@@ -33,9 +29,6 @@ const App: React.FC = () => {
     return '';
   });
   
-  // Toggle for showing the input field
-  const [showKeyInput, setShowKeyInput] = useState(false);
-
   const [mode, setMode] = useState<'single' | 'batch'>('single');
   const [jobs, setJobs] = useState<StickerJob[]>([]);
   const [selectedStyle, setSelectedStyle] = useState(FAITHFUL_STYLE);
@@ -43,29 +36,11 @@ const App: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Computed hasKey
-  const hasKey = isAIStudio ? aiStudioHasKey : customApiKey.length > 0;
+  const hasKey = apiKey.length > 0;
 
   useEffect(() => {
     if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
       setIsDarkMode(true);
-    }
-    
-    // Check environment
-    const isStudio = typeof window !== 'undefined' && !!(window as any).aistudio;
-    setIsAIStudio(isStudio);
-
-    if (isStudio) {
-      // Check for existing key selection in AI Studio
-      const checkKey = async () => {
-         try {
-           const has = await (window as any).aistudio.hasSelectedApiKey();
-           setAiStudioHasKey(has);
-         } catch (e) {
-           console.error("Failed to check API key status", e);
-         }
-      };
-      checkKey();
     }
   }, []);
 
@@ -79,21 +54,9 @@ const App: React.FC = () => {
 
   const toggleDarkMode = () => setIsDarkMode(!isDarkMode);
 
-  const handleSelectKey = async () => {
-    if (isAIStudio) {
-      try {
-        await (window as any).aistudio.openSelectKey();
-        setAiStudioHasKey(true);
-      } catch (e) {
-        console.error("Key selection failed", e);
-        setAiStudioHasKey(false);
-      }
-    }
-  };
-
-  const handleCustomKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleApiKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
-    setCustomApiKey(val);
+    setApiKey(val);
     localStorage.setItem('sticker_maker_api_key', val);
   };
 
@@ -151,7 +114,7 @@ const App: React.FC = () => {
   const processJobs = async () => {
     if (jobs.length === 0) return;
     if (!hasKey) {
-      setErrorMsg(isAIStudio ? "Please select a Project." : "Please enter a valid API Key.");
+      setErrorMsg("Please enter a valid API Key.");
       return;
     }
     
@@ -168,8 +131,7 @@ const App: React.FC = () => {
           const input = job.markedUrl || job.originalFile;
           const hasDrawing = !!job.markedUrl;
 
-          // Pass customApiKey if not in AI Studio
-          const stickerUrl = await generateSticker(input, selectedStyle, hasDrawing, isAIStudio ? undefined : customApiKey);
+          const stickerUrl = await generateSticker(input, selectedStyle, hasDrawing, apiKey);
           
           return { id: job.id, success: true, url: stickerUrl };
         } catch (err: any) {
@@ -181,12 +143,9 @@ const App: React.FC = () => {
       const results = await Promise.all(promises);
 
       // Check for key expiration/not found error in any result
-      const keyError = results.find(r => !r.success && r.error && typeof r.error === 'string' && (r.error.includes('Requested entity was not found') || r.error.includes('API key not valid')));
+      const keyError = results.find(r => !r.success && r.error && typeof r.error === 'string' && (r.error.includes('403') || r.error.includes('Permission denied') || r.error.includes('API key not valid')));
       if (keyError) {
-          if (isAIStudio) {
-              setAiStudioHasKey(false);
-          }
-          setErrorMsg("Invalid API Key or Session. Please check your key.");
+          setErrorMsg("Permission Denied: Please check your API Key and ensure Billing is enabled for your project.");
       }
 
       setJobs(prev => prev.map(job => {
@@ -247,8 +206,8 @@ const App: React.FC = () => {
                                 <span className="font-medium text-slate-700 dark:text-slate-300">Google Cloud API Key</span>
                                 <p className="text-slate-500 text-xs dark:text-slate-400">
                                     {hasKey 
-                                        ? "API Key active." 
-                                        : "Required for high-quality image generation."}
+                                        ? "API Key active" 
+                                        : "Required for image generation"}
                                 </p>
                             </div>
                         </div>
@@ -265,34 +224,15 @@ const App: React.FC = () => {
                                 </a>
                             )}
                             
-                            {isAIStudio ? (
-                                <button
-                                    onClick={handleSelectKey}
-                                    className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                                        !hasKey 
-                                        ? 'bg-brand-500 hover:bg-brand-600 text-white shadow-md' 
-                                        : 'bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300'
-                                    }`}
-                                >
-                                    {hasKey ? 'Change Project' : 'Select Project'}
-                                </button>
-                            ) : (
-                                <div className="relative flex items-center w-full sm:w-64">
-                                    <input 
-                                        type={showKeyInput ? "text" : "password"} 
-                                        value={customApiKey}
-                                        onChange={handleCustomKeyChange}
-                                        placeholder="Paste Gemini API Key"
-                                        className="w-full pr-10 pl-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 focus:ring-2 focus:ring-brand-500 focus:outline-none dark:text-white"
-                                    />
-                                    <button 
-                                        onClick={() => setShowKeyInput(!showKeyInput)}
-                                        className="absolute right-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                                    >
-                                        {showKeyInput ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                                    </button>
-                                </div>
-                            )}
+                            <div className="relative flex items-center w-full sm:w-80">
+                                <input 
+                                    type="text" 
+                                    value={apiKey}
+                                    onChange={handleApiKeyChange}
+                                    placeholder="Paste Gemini API Key (starts with AIza...)"
+                                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 focus:ring-2 focus:ring-brand-500 focus:outline-none dark:text-white"
+                                />
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -469,7 +409,7 @@ const App: React.FC = () => {
                         </button>
                         {!hasKey && (
                         <p className="text-center text-red-500 text-sm mt-3">
-                            {isAIStudio ? "Please select a Project API Key" : "Please enter your API Key"} to proceed
+                            Please enter your API Key to proceed
                         </p>
                         )}
                     </div>
